@@ -121,7 +121,7 @@ export default function StremioAutoSetup() {
         
         {/* Header */}
         <div className="p-8 bg-blue-600/10 border-b border-slate-800 text-center">
-          <h1 className="text-3xl font-black text-blue-500 mb-2 italic">Stremio Nano Banana Pro 🍌</h1>
+          <h1 className="text-3xl font-black text-blue-500 mb-2 italic">Stremio Auto Setup - By Hussain</h1>
           <p className="text-slate-400 text-sm">أداة الإعداد التلقائي والمزامنة الاحترافية</p>
         </div>
 
