@@ -1,29 +1,30 @@
+// app/api/sync/route.js
 import { NextResponse } from 'next/server';
 
 export async function POST(request) {
-    const { service, type, key } = await request.json();
+  try {
+    const body = await request.json();
+    
+    // إرسال الطلب من السيرفر (Server-side) لضمان القبول وتجاوز الـ CORS
+    const response = await fetch('https://api.strem.io/api/addonCollectionSet', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'User-Agent': 'Stremio/1.6.0' // محاكاة تطبيق ستريميو
+      },
+      body: JSON.stringify({
+        type: "AddonCollectionSet", // الحقل الضروري المكتشف في كود bootstrapper
+        authKey: body.authKey,
+        addons: body.addons
+      })
+    });
 
-    try {
-        let response;
-        if (service === 'tmdb') {
-            response = await fetch(`https://api.themoviedb.org/3/configuration?api_key=${key}`);
-        } else if (service === 'debrid') {
-            if (type === 'realdebrid') {
-                response = await fetch(`https://api.real-debrid.com/rest/1.0/user?auth_token=${key}`);
-            } else if (type === 'torbox') {
-                response = await fetch(`https://api.torbox.app/v1/api/user/me`, {
-                    headers: { 'Authorization': `Bearer ${key}` }
-                });
-            } else if (type === 'alldebrid') {
-                response = await fetch(`https://api.alldebrid.com/v4/user/details?agent=nano&apikey=${key}`);
-            }
-        }
-
-        if (response && response.ok) {
-            return NextResponse.json({ success: true });
-        }
-        return NextResponse.json({ success: false }, { status: 400 });
-    } catch (error) {
-        return NextResponse.json({ success: false }, { status: 500 });
-    }
+    const data = await response.json();
+    
+    // إرجاع النتيجة للواجهة الأمامية
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error("Sync API Error:", error);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
 }
