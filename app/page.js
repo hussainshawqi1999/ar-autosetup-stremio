@@ -1,7 +1,8 @@
 "use client";
 import React, { useState } from 'react';
 import { 
-  ShieldCheck, RefreshCw, Trash2, Globe, Star, Database, CheckCircle2, XCircle, Activity, Zap 
+  ShieldCheck, RefreshCw, Trash2, Database, CheckCircle2, XCircle, Activity, Star, 
+  Layers, Loader2, ArrowUp, ArrowDown, Film, MonitorPlay, ZapOff 
 } from 'lucide-react';
 
 export default function NanoBananaPro() {
@@ -9,17 +10,17 @@ export default function NanoBananaPro() {
   const [credentials, setCredentials] = useState({ email: '', password: '' });
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, status: '' });
   
-  // إعدادات الخدمات (Torrentio + StremThru)
+  // إعدادات الخدمات (جعل API Key اختيارياً)
   const [debrid, setDebrid] = useState({ type: 'realdebrid', apiKey: '' });
-  const rpdbKey = "t0-free-rpdb"; // مفتاح التقييمات المدمج
-  
   const [verifyStatus, setVerifyStatus] = useState({ debrid: 'idle' });
   const [addons, setAddons] = useState([]);
+  const rpdbKey = "t0-free-rpdb"; 
 
-  // --- التحقق من الـ API عبر السيرفر الوسيط (لضمان تجاوز الـ X) ---
+  // --- التحقق من الـ API (يعمل فقط إذا تم إدخال مفتاح) ---
   const verifyAPI = async (service, key) => {
-    if (!key) return alert("يرجى إدخال المفتاح أولاً");
+    if (!key) return; // لا حاجة للتحقق إذا كان الحقل فارغاً
     setVerifyStatus(prev => ({ ...prev, [service]: 'loading' }));
     try {
       const res = await fetch('/api/verify', {
@@ -41,139 +42,163 @@ export default function NanoBananaPro() {
         body: JSON.stringify({ ...credentials, type: 'Login' })
       });
       const data = await res.json();
-      if (data.result?.authKey) {
-        setAuthKey(data.result.authKey);
-        setStep(2);
-      } else { alert("بيانات الدخول غير صحيحة"); }
+      if (data.result?.authKey) { setAuthKey(data.result.authKey); setStep(2); }
+      else { alert("بيانات الدخول غير صحيحة"); }
     } catch (e) { alert("فشل الاتصال بخادم Stremio"); }
     setLoading(false);
   };
 
-  // --- تنظيف الحساب (خطوة إجبارية لمسح أخطاء الـ Null القديمة) ---
-  const clearAccount = async () => {
-    if (!confirm("سيتم تصفير الحساب تماماً، هل أنت موافق؟")) return;
-    setLoading(true);
-    try {
-      await fetch('https://api.strem.io/api/addonCollectionSet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ authKey, addons: [] })
-      });
-      alert("تم تنظيف الحساب بنجاح! جاهز للمزامنة الجديدة.");
-      setAddons([]);
-    } catch (e) { alert("فشل التنظيف"); }
-    setLoading(false);
-  };
-
-  // --- بناء الإضافات الثلاث (النسخة المستقرة) ---
+  // --- توليد قائمة الإضافات (منطق الديبريد الاختياري) ---
   const generateAddons = () => {
-    if (!debrid.apiKey) return alert("يرجى إدخال مفتاح Debrid");
-    
     const { type, apiKey } = debrid;
-
+    
+    // الإضافات الأساسية التي لا تحتاج ديبريد
     const presets = [
-      // 1. Torrentio (Debrid + Arabic + RPDB)
-      { name: 'Torrentio', url: `https://torrentio.strem.fun/${type}=${apiKey}|language=ar|rpdb=${rpdbKey}/manifest.json` },
-      
-      // 2. StremThru Torz (Debrid Setup)
-      { name: 'StremThru Torz', url: `https://stremthru.strem.io/torz/config/${apiKey}/manifest.json` },
-      
-      // 3. SubHero (الترجمة العربية التلقائية)
-      { name: 'SubHero', url: `https://subhero.strem.io/manifest.json` },
-
-      // إضافة Cinemeta الرسمية لضمان عمل الواجهة
-      { name: 'Cinemeta', url: `https://v3-cinemeta.strem.io/manifest.json` }
+      { name: 'Cinemeta (Official)', url: 'https://v3-cinemeta.strem.io/manifest.json' },
+      { name: 'Public Movie Domains', url: 'https://public-domain-movies.strem.io/manifest.json' },
+      { name: 'SubHero', url: 'https://subhero.strem.io/manifest.json' }
     ];
 
-    // إرسال البيانات الصافية فقط لمنع خطأ الـ Null
-    setAddons(presets.map(p => ({
-      transportUrl: p.url,
-      transportName: 'http'
-    })));
+    // بناء رابط Torrentio بناءً على وجود الديبريد أو عدمه
+    let torrentioUrl = "https://torrentio.strem.fun/";
+    if (apiKey) {
+      torrentioUrl += `${type}=${apiKey}|`;
+    }
+    torrentioUrl += `language=ar|rpdb=${rpdbKey}/manifest.json`;
+    presets.push({ name: apiKey ? 'Torrentio (Debrid)' : 'Torrentio (P2P)', url: torrentioUrl });
+
+    // إضافة StremThru فقط في حال وجود ديبريد لأنه لا يعمل بدونه
+    if (apiKey) {
+      presets.push({ name: 'StremThru Torz', url: `https://stremthru.strem.io/torz/config/${apiKey}/manifest.json` });
+    }
+
+    setAddons(presets.map(p => ({ transportUrl: p.url, transportName: 'http', name: p.name })));
     setStep(3);
   };
 
-  const syncToStremio = async () => {
+  // --- وظائف التحكم (ترتيب وحذف) ---
+  const moveAddon = (index, direction) => {
+    const newAddons = [...addons];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= newAddons.length) return;
+    [newAddons[index], newAddons[targetIndex]] = [newAddons[targetIndex], newAddons[index]];
+    setAddons(newAddons);
+  };
+
+  const deleteAddon = (index) => setAddons(addons.filter((_, i) => i !== index));
+
+  // --- المزامنة المتسلسلة (واحدة تلو الأخرى) ---
+  const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+  const syncOneByOne = async () => {
+    if (addons.length === 0) return alert("القائمة فارغة!");
     setLoading(true);
+    setSyncProgress({ current: 0, total: addons.length, status: 'بدء المزامنة المتسلسلة...' });
+    
+    let currentCollection = [];
     try {
-      const res = await fetch('https://api.strem.io/api/addonCollectionSet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ authKey, addons })
-      });
-      const data = await res.json();
-      if (data.result?.success) {
-        alert("تمت المزامنة بنجاح يا حسين! الإضافات الثلاث تعمل الآن باللغة العربية.");
-      } else {
-        alert("فشلت المزامنة: " + JSON.stringify(data.error));
+      for (let i = 0; i < addons.length; i++) {
+        const addon = addons[i];
+        setSyncProgress({ current: i + 1, total: addons.length, status: `جاري تثبيت: ${addon.name}...` });
+        currentCollection.push({ transportUrl: addon.transportUrl, transportName: 'http' });
+
+        const res = await fetch('https://api.strem.io/api/addonCollectionSet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ authKey, addons: currentCollection })
+        });
+        
+        const data = await res.json();
+        if (!data.result?.success) throw new Error(`فشل تثبيت ${addon.name}`);
+
+        if (i < addons.length - 1) {
+          setSyncProgress(prev => ({ ...prev, status: `تم! بانتظار 5 ثوانٍ للإضافة التالية...` }));
+          await delay(5000);
+        }
       }
-    } catch (e) { alert("خطأ في المزامنة"); }
+      alert("تمت المزامنة بنجاح! القائمة مرتبة كما طلبت.");
+      setSyncProgress({ current: 0, total: 0, status: 'اكتمل بنجاح ✅' });
+    } catch (e) { alert("حدث خطأ أثناء المزامنة: " + e.message); }
     setLoading(false);
   };
 
-  const StatusIcon = ({ s }) => (
-    s === 'loading' ? <Activity className="animate-spin text-blue-400" size={14}/> :
-    s === 'success' ? <CheckCircle2 className="text-green-500" size={14}/> :
-    s === 'error' ? <XCircle className="text-red-500" size={14}/> : null
-  );
-
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100 font-sans p-4 flex justify-center items-center" dir="rtl">
-      <div className="w-full max-w-lg bg-[#0f172a] rounded-3xl border border-slate-800 shadow-2xl">
+      <div className="w-full max-w-xl bg-[#0f172a] rounded-3xl border border-slate-800 shadow-2xl overflow-hidden">
         
-        <div className="p-6 bg-blue-600/10 border-b border-slate-800 text-center">
-          <h1 className="text-2xl font-black text-blue-500 italic">Nano Banana Pro 🍌 Triple Core</h1>
-          <p className="text-slate-400 text-[10px] tracking-widest mt-1 uppercase italic tracking-tighter text-center">Hussain Edition</p>
+        <div className="p-6 bg-blue-600/10 border-b border-slate-800 text-center italic font-black text-2xl text-blue-500">
+          Nano Banana Pro 🍌 v26
         </div>
 
         <div className="p-8">
           {step === 1 && (
-            <div className="space-y-4">
-              <input className="w-full p-4 rounded-xl bg-slate-900 border border-slate-800 outline-none focus:border-blue-500 transition" placeholder="إيميل ستريميو" onChange={e => setCredentials({...credentials, email: e.target.value})} />
-              <input className="w-full p-4 rounded-xl bg-slate-900 border border-slate-800 focus:border-blue-500 outline-none transition" type="password" placeholder="كلمة المرور" onChange={e => setCredentials({...credentials, password: e.target.value})} />
-              <button onClick={handleLogin} disabled={loading} className="w-full bg-blue-600 p-4 rounded-xl font-bold hover:bg-blue-700 transition">دخول</button>
+            <div className="space-y-4 text-right">
+              <label className="text-sm font-bold text-slate-500">بيانات ستريميو</label>
+              <input className="w-full p-4 rounded-xl bg-slate-900 border border-slate-800 outline-none" placeholder="البريد الإلكتروني" onChange={e => setCredentials({...credentials, email: e.target.value})} />
+              <input className="w-full p-4 rounded-xl bg-slate-900 border border-slate-800 outline-none" type="password" placeholder="كلمة المرور" onChange={e => setCredentials({...credentials, password: e.target.value})} />
+              <button onClick={handleLogin} disabled={loading} className="w-full bg-blue-600 p-4 rounded-xl font-bold">دخول ومتابعة</button>
             </div>
           )}
 
           {step === 2 && (
             <div className="space-y-6 text-right">
-              <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800 space-y-4">
-                <label className="text-xs font-bold text-blue-400 flex items-center gap-2"><Database size={16}/> إعداد الـ Debrid</label>
+              <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-800">
+                <div className="flex justify-between items-center mb-2">
+                   <label className="text-xs font-bold text-blue-400 flex items-center gap-2"><Database size={16}/> إعداد Debrid (اختياري)</label>
+                   {!debrid.apiKey && <span className="text-[10px] text-amber-500 flex items-center gap-1"><ZapOff size={12}/> وضع الـ P2P مفعّل</span>}
+                </div>
                 <div className="flex gap-2">
-                  <select className="p-3 rounded-xl bg-slate-800 border border-slate-700 text-xs text-blue-400 outline-none" onChange={e => setDebrid({...debrid, type: e.target.value})}>
+                  <select className="p-3 rounded-xl bg-slate-800 border border-slate-700 text-xs" onChange={e => setDebrid({...debrid, type: e.target.value})}>
                     <option value="realdebrid">Real-Debrid</option>
                     <option value="torbox">TorBox</option>
-                    <option value="alldebrid">All-Debrid</option>
                   </select>
                   <div className="flex-1 relative">
-                    <input className="w-full p-3 rounded-xl bg-slate-800 border border-slate-700 text-xs pr-10 outline-none focus:border-blue-500" placeholder="API Key" onChange={e => setDebrid({...debrid, apiKey: e.target.value})} />
-                    <button onClick={() => verifyAPI('debrid', debrid.apiKey)} className="absolute left-1.5 top-1.5 bg-slate-700 p-1.5 rounded text-[8px] flex items-center gap-1 font-bold">فحص <StatusIcon s={verifyStatus.debrid}/></button>
+                    <input className="w-full p-3 rounded-xl bg-slate-800 border border-slate-700 text-xs pr-10" placeholder="API Key (اتركه فارغاً للتثبيت العادي)" onChange={e => setDebrid({...debrid, apiKey: e.target.value})} />
+                    {debrid.apiKey && (
+                      <button onClick={() => verifyAPI('debrid', debrid.apiKey)} className="absolute left-1.5 top-1.5 bg-slate-700 p-1.5 rounded text-[8px] flex items-center gap-1 font-bold">
+                         تحقق {verifyStatus.debrid === 'loading' ? <Loader2 className="animate-spin" size={10}/> : verifyStatus.debrid === 'success' ? '✅' : '❌'}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
-
-              <div className="bg-blue-600/10 p-3 rounded-xl border border-blue-500/30 flex justify-between items-center">
-                 <div className="flex items-center gap-2 text-[10px] text-blue-400 font-bold uppercase tracking-widest italic">
-                    <Star size={14} className="text-yellow-500 animate-pulse"/> RPDB & AR Subs Active
-                 </div>
-                 <div className="text-[10px] text-slate-500">Triple Preset</div>
-              </div>
-
-              <button onClick={generateAddons} className="w-full bg-blue-600 p-4 rounded-xl font-bold shadow-lg transition hover:scale-[1.01]">توليد القائمة ←</button>
-              <button onClick={clearAccount} className="w-full border border-red-500/30 text-red-500 p-2 rounded-xl text-[10px] flex items-center justify-center gap-2 hover:bg-red-500/5 transition"><Trash2 size={12}/> تنظيف الحساب (هام جداً)</button>
+              <button onClick={generateAddons} className="w-full bg-blue-600 p-4 rounded-xl font-bold shadow-lg">توليد الإضافات والترتيب ←</button>
             </div>
           )}
 
           {step === 3 && (
             <div className="space-y-4">
-              <div className="flex justify-between items-center bg-green-600/10 p-4 rounded-2xl border border-green-500/20 text-right">
-                <h2 className="font-bold text-sm text-green-400">القائمة المختصرة جاهزة</h2>
-                <button onClick={syncToStremio} className="bg-green-600 px-6 py-2 rounded-full font-bold text-xs animate-pulse hover:animate-none transition">مزامنة سحابية (Sync)</button>
+              <div className="bg-blue-600/10 p-4 rounded-2xl border border-blue-500/20 flex justify-between items-center">
+                <div className="text-right">
+                  <h2 className="font-bold text-sm text-blue-400 italic">التحكم النهائي</h2>
+                  <p className="text-[10px] text-slate-400">رتب أو احذف الإضافات قبل المزامنة المتسلسلة</p>
+                </div>
+                <button onClick={syncOneByOne} disabled={loading} className="bg-green-600 px-6 py-2 rounded-full font-bold text-xs shadow-lg shadow-green-900/40">
+                  {loading ? 'جاري العمل...' : 'بدء المزامنة'}
+                </button>
               </div>
-              <div className="space-y-2 max-h-48 overflow-y-auto px-2">
+
+              {loading && (
+                <div className="bg-slate-900 p-3 rounded-xl border border-blue-500/30 text-center animate-pulse">
+                   <p className="text-[10px] text-blue-300 font-bold">{syncProgress.status}</p>
+                   <div className="w-full bg-slate-800 h-1 mt-2 rounded-full overflow-hidden">
+                      <div className="bg-blue-500 h-full transition-all duration-500" style={{ width: `${(syncProgress.current / syncProgress.total) * 100}%` }}></div>
+                   </div>
+                </div>
+              )}
+
+              <div className="space-y-2 max-h-80 overflow-y-auto px-1">
                 {addons.map((ad, i) => (
-                  <div key={i} className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-[8px] font-mono text-blue-300 truncate">
-                    {ad.transportUrl}
+                  <div key={i} className="flex items-center justify-between bg-slate-900/80 p-3 rounded-xl border border-slate-800 group transition hover:border-blue-500/40">
+                    <div className="flex items-center gap-3">
+                      <div className="text-[10px] bg-slate-800 w-5 h-5 flex items-center justify-center rounded-full text-blue-400 font-bold">{i + 1}</div>
+                      <span className="text-xs font-medium text-slate-200">{ad.name}</span>
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => moveAddon(i, 'up')} disabled={i === 0} className="p-1.5 hover:bg-slate-800 rounded-lg disabled:opacity-20"><ArrowUp size={14}/></button>
+                      <button onClick={() => moveAddon(i, 'down')} disabled={i === addons.length - 1} className="p-1.5 hover:bg-slate-800 rounded-lg disabled:opacity-20"><ArrowDown size={14}/></button>
+                      <button onClick={() => deleteAddon(i)} className="p-1.5 hover:bg-red-900/30 text-red-500 rounded-lg"><Trash2 size={14}/></button>
+                    </div>
                   </div>
                 ))}
               </div>
